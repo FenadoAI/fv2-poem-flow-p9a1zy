@@ -73,6 +73,23 @@ class SearchResponse(BaseModel):
     sources_count: int
     error: Optional[str] = None
 
+
+class PoemRequest(BaseModel):
+    theme: str
+    style: str = "free_verse"  # free_verse, haiku, sonnet, limerick
+    mood: str = "neutral"  # happy, sad, romantic, mysterious, neutral
+    length: str = "medium"  # short, medium, long
+
+
+class PoemResponse(BaseModel):
+    success: bool
+    poem: str
+    theme: str
+    style: str
+    mood: str
+    metadata: dict = Field(default_factory=dict)
+    error: Optional[str] = None
+
 # Routes
 @api_router.get("/")
 async def root():
@@ -194,6 +211,82 @@ async def get_agent_capabilities():
             "success": False,
             "error": str(e)
         }
+
+
+@api_router.post("/generate-poem", response_model=PoemResponse)
+async def generate_poem(request: PoemRequest):
+    # Generate poem using AI agent
+    global chat_agent
+
+    try:
+        # Init chat agent if needed
+        if chat_agent is None:
+            chat_agent = ChatAgent(agent_config)
+
+        # Create detailed poem prompt
+        style_instructions = {
+            "free_verse": "Write in free verse with no specific rhyme scheme or meter",
+            "haiku": "Write a traditional haiku with 5-7-5 syllable structure",
+            "sonnet": "Write a Shakespearean sonnet with 14 lines and ABAB CDCD EFEF GG rhyme scheme",
+            "limerick": "Write a limerick with AABBA rhyme scheme and humorous tone"
+        }
+
+        length_instructions = {
+            "short": "Keep it concise, 4-8 lines",
+            "medium": "Write a moderate length poem, 8-16 lines",
+            "long": "Create a longer poem, 16-24 lines"
+        }
+
+        mood_instructions = {
+            "happy": "with an uplifting, joyful, and positive tone",
+            "sad": "with a melancholic, reflective, and somber tone",
+            "romantic": "with a loving, passionate, and tender tone",
+            "mysterious": "with an enigmatic, intriguing, and mystical tone",
+            "neutral": "with a balanced and contemplative tone"
+        }
+
+        poem_prompt = f"""Write a beautiful {request.style.replace('_', ' ')} poem about {request.theme} {mood_instructions[request.mood]}.
+        {style_instructions[request.style]}. {length_instructions[request.length]}.
+
+        Focus on vivid imagery, emotional depth, and artistic expression. Make it creative and engaging.
+        Return only the poem without any additional text or explanations."""
+
+        # Generate poem
+        result = await chat_agent.execute(poem_prompt)
+
+        if result.success:
+            return PoemResponse(
+                success=True,
+                poem=result.content.strip(),
+                theme=request.theme,
+                style=request.style,
+                mood=request.mood,
+                metadata={
+                    "length": request.length,
+                    "generated_at": datetime.utcnow().isoformat(),
+                    "model_used": result.metadata.get("model", "unknown")
+                }
+            )
+        else:
+            return PoemResponse(
+                success=False,
+                poem="",
+                theme=request.theme,
+                style=request.style,
+                mood=request.mood,
+                error=result.error or "Failed to generate poem"
+            )
+
+    except Exception as e:
+        logger.error(f"Error in poem generation endpoint: {e}")
+        return PoemResponse(
+            success=False,
+            poem="",
+            theme=request.theme,
+            style=request.style,
+            mood=request.mood,
+            error=str(e)
+        )
 
 # Include router
 app.include_router(api_router)
